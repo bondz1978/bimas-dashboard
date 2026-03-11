@@ -1,0 +1,3 @@
+-- Database dikelola secara eksternal (PostgreSQL lokal)
+-- File ini tidak perlu diisi data
+-- Backend konek langsung via DB_HOST di docker-compose.yml

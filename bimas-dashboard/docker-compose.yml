@@ -1,0 +1,29 @@
+services:
+
+  # ── Backend (Express) ───────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: bimas-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-3001}:${PORT:-3001}"
+
+  # ── Frontend (Nuxt 3) ───────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        API_BASE: ${API_BASE:-http://backend:3001/api}
+    container_name: bimas-frontend
+    restart: unless-stopped
+    environment:
+      NUXT_PUBLIC_API_BASE: ${NUXT_PUBLIC_API_BASE:-http://localhost:3001/api}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
