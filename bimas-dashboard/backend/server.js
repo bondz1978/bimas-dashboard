@@ -7,6 +7,7 @@ import session from 'express-session'
 import passport from 'passport'
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
 import crypto from 'crypto'
+import cookieParser from 'cookie-parser'
 
 const { Pool } = pg
 const app  = express()
@@ -15,6 +16,7 @@ const PORT = process.env.PORT || 3001
 // ─────────────────────────────────────────────────────────
 //  SESSION & PASSPORT
 // ─────────────────────────────────────────────────────────
+app.use(cookieParser())
 app.use(cors({
   origin: [
     'http://localhost:3000',
@@ -58,6 +60,15 @@ function validateToken(token) {
   return data
 }
 
+// Middleware — wajib login
+function requireAuth(req, res, next) {
+  const token = req.cookies?.admin_token || req.headers['authorization']?.replace('Bearer ', '')
+  if (!token || !validateToken(token)) {
+    return res.status(401).json({ error: 'Unauthorized — silakan login sebagai admin' })
+  }
+  next()
+}
+
 passport.use(new GoogleStrategy({
   clientID:     process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
@@ -84,8 +95,15 @@ app.get('/auth/google/callback',
   passport.authenticate('google', { failureRedirect: '/auth/failed', session: false }),
   (req, res) => {
     const token = generateToken(req.user)
+    const isProd = process.env.NODE_ENV === 'production'
+    res.cookie('admin_token', token, {
+      httpOnly: true,      // tidak bisa dibaca JavaScript
+      secure: isProd,      // https only di production
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000 // 24 jam
+    })
     const frontend = process.env.FRONTEND_URL || 'http://localhost:3000'
-    res.redirect(`${frontend}/admin?auth=success&token=${token}`)
+    res.redirect(`${frontend}/admin?auth=success`)
   }
 )
 
@@ -94,7 +112,7 @@ app.get('/auth/failed', (_req, res) => {
 })
 
 app.get('/auth/me', (req, res) => {
-  const token = req.headers['authorization']?.replace('Bearer ', '')
+  const token = req.cookies?.admin_token
   if (!token) return res.json({ authenticated: false })
   const user = validateToken(token)
   if (user) {
@@ -105,8 +123,9 @@ app.get('/auth/me', (req, res) => {
 })
 
 app.post('/auth/logout', (req, res) => {
-  const token = req.headers['authorization']?.replace('Bearer ', '')
+  const token = req.cookies?.admin_token
   if (token) tokenStore.delete(token)
+  res.clearCookie('admin_token')
   res.json({ ok: true })
 })
 
@@ -293,7 +312,7 @@ app.get('/api/kabkota', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
-app.get('/api/penyuluh', async (req, res) => {
+app.get('/api/penyuluh', requireAuth, async (req, res) => {
   try {
     const page     = parseInt(req.query.page)  || 1
     const limit    = parseInt(req.query.limit) || 20
@@ -321,7 +340,7 @@ app.get('/api/penyuluh', async (req, res) => {
     if (kabkota) { where.push(`satuan_kerja = $${i}`); params.push(kabkota); i++ }
     const W2 = where.join(' AND ')
     const [data, count] = await Promise.all([
-      pool.query(`SELECT id, nama, nip_baru, golongan, jabatan, satuan_kerja, satker_provinsi, grup_satker, CASE agama WHEN 1 THEN 'Islam' WHEN 2 THEN 'Kristen' WHEN 3 THEN 'Katolik' WHEN 4 THEN 'Hindu' WHEN 5 THEN 'Buddha' ELSE 'Lainnya' END AS agama, CASE kelamin WHEN 1 THEN 'Laki-laki' ELSE 'Perempuan' END AS kelamin, tanggal_lahir, gapok, tunjangan_umum, tunjangan_fungsional, tunjangan_beras, total_belanja FROM asn_penyuluh WHERE ${W2} ORDER BY id LIMIT $${i} OFFSET $${i+1}`, [...params, limit, offset]),
+      pool.query(`SELECT id, nama, LEFT(nip_baru, 4) || REPEAT('*', LENGTH(nip_baru) - 4) AS nip_baru, golongan, jabatan, satuan_kerja, satker_provinsi, grup_satker, CASE agama WHEN 1 THEN 'Islam' WHEN 2 THEN 'Kristen' WHEN 3 THEN 'Katolik' WHEN 4 THEN 'Hindu' WHEN 5 THEN 'Buddha' ELSE 'Lainnya' END AS agama, CASE kelamin WHEN 1 THEN 'Laki-laki' ELSE 'Perempuan' END AS kelamin, tanggal_lahir, gapok, tunjangan_umum, tunjangan_fungsional, tunjangan_beras, total_belanja FROM asn_penyuluh WHERE ${W2} ORDER BY id LIMIT $${i} OFFSET $${i+1}`, [...params, limit, offset]),
       pool.query(`SELECT COUNT(*) AS total FROM asn_penyuluh WHERE ${W2}`, params),
     ])
     res.json({ data: data.rows, total: parseInt(count.rows[0].total), page, limit, totalPages: Math.ceil(parseInt(count.rows[0].total) / limit) })
@@ -336,7 +355,7 @@ app.get('/api/export/excel', async (_req, res) => {
   try {
     const [penyuluh, summary] = await Promise.all([
       pool.query(`
-        SELECT nama, nip_baru, golongan, jabatan, satuan_kerja, satker_provinsi, grup_satker,
+        SELECT nama, LEFT(nip_baru, 4) || REPEAT('*', LENGTH(nip_baru) - 4) AS nip_baru, golongan, jabatan, satuan_kerja, satker_provinsi, grup_satker,
           CASE agama WHEN 1 THEN 'Islam' WHEN 2 THEN 'Kristen' WHEN 3 THEN 'Katolik' WHEN 4 THEN 'Hindu' WHEN 5 THEN 'Buddha' ELSE 'Lainnya' END AS agama,
           CASE kelamin WHEN 1 THEN 'Laki-laki' ELSE 'Perempuan' END AS kelamin,
           tanggal_lahir, gapok, tunjangan_umum, tunjangan_fungsional, tunjangan_beras, total_belanja

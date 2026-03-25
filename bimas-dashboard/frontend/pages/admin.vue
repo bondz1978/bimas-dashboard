@@ -259,53 +259,39 @@ const googleAuthUrl = `${apiBase}/auth/google`
 
 const authBase = computed(() => config2.public.apiBase.replace('/api', ''))
 
-function getToken() { return localStorage.getItem('admin_token') }
-function setToken(t) { localStorage.setItem('admin_token', t) }
-function clearToken() { localStorage.removeItem('admin_token') }
-
 async function checkAuth() {
-  const token = getToken()
-  if (!token) return
   try {
     const res = await $fetch(`${authBase.value}/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` }
+      credentials: 'include'
     })
     if (res.authenticated) {
       authenticated.value = true
       googleUser.value = res.user
     } else {
-      clearToken()
+      authenticated.value = false
     }
   } catch (e) {
-    clearToken()
     authenticated.value = false
   }
 }
 
 async function logout() {
-  const token = getToken()
-  if (token) {
-    await $fetch(`${authBase.value}/auth/logout`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` }
-    }).catch(() => {})
-  }
-  clearToken()
+  await $fetch(`${authBase.value}/auth/logout`, {
+    method: 'POST',
+    credentials: 'include'
+  }).catch(() => {})
   authenticated.value = false
   googleUser.value = null
 }
 
 onMounted(async () => {
-  // Cek hasil redirect dari Google — ambil token dari URL
   const urlParams = new URLSearchParams(window.location.search)
   const authStatus = urlParams.get('auth')
-  const token = urlParams.get('token')
 
   if (authStatus === 'failed') {
     authFailed.value = true
     window.history.replaceState({}, '', '/admin')
-  } else if (authStatus === 'success' && token) {
-    setToken(token)
+  } else if (authStatus === 'success') {
     window.history.replaceState({}, '', '/admin')
   }
 

@@ -140,7 +140,7 @@
               <th class="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap" style="color: var(--text-muted)">NIP</th>
               <th class="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap" style="color: var(--text-muted)">Golongan</th>
               <th class="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap" style="color: var(--text-muted)">Provinsi</th>
-              <th class="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap" style="color: var(--text-muted)">Satuan Kerja</th>
+              <th class="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap" style="color: var(--text-muted)">Kab / Kota</th>
               <th class="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap" style="color: var(--text-muted)">Agama</th>
               <th class="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap" style="color: var(--text-muted)">Kelamin</th>
               <th class="px-3 py-2.5 text-right text-xs font-bold uppercase tracking-wider whitespace-nowrap" style="color: var(--text-muted)">Gapok</th>
@@ -157,7 +157,7 @@
             >
               <td class="px-3 py-2.5" style="color: var(--text-muted); font-size: 12px">{{ (page - 1) * limit + i + 1 }}</td>
               <td class="px-3 py-2.5 font-semibold" style="max-width: 200px; color: var(--text-primary)">{{ row.nama }}</td>
-              <td class="px-3 py-2.5" style="font-family: 'Courier New', monospace; font-size: 11.5px; color: var(--text-secondary)">{{ row.nip_baru }}</td>
+              <td class="px-3 py-2.5" style="font-family: 'Courier New', monospace; font-size: 11.5px; color: var(--text-secondary)">{{ maskNip(row.nip_baru) }}</td>
               <td class="px-3 py-2.5">
                 <span class="inline-block px-2 py-0.5 rounded text-xs font-semibold" style="background: var(--sky-50); color: var(--sky-700); border: 1px solid var(--sky-100)">{{ row.golongan }}</span>
               </td>
@@ -183,7 +183,17 @@
               <td class="px-3 py-2.5 text-right font-semibold" style="font-family: 'Courier New', monospace; font-size: 11.5px; color: var(--olive-700)">{{ formatRp(row.total_belanja) }}</td>
             </tr>
 
-            <tr v-if="rows.length === 0">
+            <tr v-if="notAuthorized">
+              <td colspan="10" class="text-center py-16">
+                <div class="text-4xl mb-3">🔐</div>
+                <div class="text-sm font-bold mb-1" style="color: var(--text-primary)">Silakan Login Terlebih Dahulu</div>
+                <div class="text-xs mb-5" style="color: var(--text-muted)">Data penyuluh hanya dapat diakses oleh admin yang telah terverifikasi</div>
+                <NuxtLink to="/admin"
+                  class="inline-block px-5 py-2 rounded-lg text-xs font-bold text-white no-underline"
+                  style="background: var(--olive-700)">Masuk sebagai Admin →</NuxtLink>
+              </td>
+            </tr>
+            <tr v-else-if="rows.length === 0">
               <td colspan="10" class="text-center py-12 text-sm" style="color: var(--text-muted)">
                 Tidak ada data yang ditemukan
               </td>
@@ -269,6 +279,7 @@ const totalPages    = ref(1)
 const page          = ref(1)
 const limit         = ref(20)
 const loading       = ref(true)
+const notAuthorized = ref(false)
 const search        = ref('')
 const filterProvinsi = ref('')
 const filterAgama   = ref('')
@@ -321,6 +332,7 @@ let searchTimer = null
 
 async function fetchData() {
   loading.value = true
+  notAuthorized.value = false
   try {
     const params = new URLSearchParams({
       page:    page.value,
@@ -331,12 +343,21 @@ async function fetchData() {
       satker:  filterSatker.value,
       kabkota: filterKabkota.value,
     })
-    const res = await $fetch(`${base}/penyuluh?${params}`)
+    const res = await $fetch(`${base}/penyuluh?${params}`, {
+      credentials: 'include'
+    })
     rows.value       = res.data
     total.value      = res.total
     totalPages.value = res.totalPages
   } catch (err) {
-    console.error('fetch error:', err)
+    if (err.status === 401) {
+      rows.value = []
+      total.value = 0
+      totalPages.value = 0
+      notAuthorized.value = true
+    } else {
+      console.error('fetch error:', err)
+    }
   } finally {
     loading.value = false
   }
@@ -392,6 +413,11 @@ function stripSatker(raw) {
     .replace(/^KANTOR KEMENTERIAN AGAMA\s*/i, '')
     .replace(/^KABUPATEN\s+/i, 'KAB. ')
     .trim()
+}
+
+function maskNip(nip) {
+  if (!nip) return '–'
+  return nip.substring(0, 4) + '*'.repeat(nip.length - 4)
 }
 
 function formatRp(val) {

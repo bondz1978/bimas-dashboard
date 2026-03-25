@@ -135,7 +135,17 @@
             Lihat Semua di Tabel →
           </NuxtLink>
         </div>
-        <div class="rounded-xl border overflow-hidden" style="background: var(--white); border-color: var(--gray-200); box-shadow: var(--shadow-sm)">
+        <!-- Not authorized -->
+        <div v-if="notAuthorized" class="rounded-xl border p-10 text-center" style="background: var(--white); border-color: var(--gray-200); box-shadow: var(--shadow-sm)">
+          <div class="text-4xl mb-3">🔐</div>
+          <div class="text-sm font-bold mb-1" style="color: var(--text-primary)">Silakan Login Terlebih Dahulu</div>
+          <div class="text-xs mb-5" style="color: var(--text-muted)">Data penyuluh hanya dapat diakses oleh admin yang telah terverifikasi</div>
+          <NuxtLink to="/admin"
+            class="inline-block px-5 py-2 rounded-lg text-xs font-bold text-white no-underline"
+            style="background: var(--olive-700)">Masuk sebagai Admin →</NuxtLink>
+        </div>
+
+        <div v-else class="rounded-xl border overflow-hidden" style="background: var(--white); border-color: var(--gray-200); box-shadow: var(--shadow-sm)">
           <table v-if="penyuluh.length" class="w-full" style="border-collapse: collapse; font-size: 12.5px">
             <thead>
               <tr style="background: var(--gray-50); border-bottom: 2px solid var(--gray-200)">
@@ -159,7 +169,7 @@
               >
                 <td class="px-3 py-2 text-xs" style="color: var(--text-muted)">{{ i + 1 }}</td>
                 <td class="px-3 py-2 font-semibold text-xs" style="max-width: 180px; color: var(--text-primary)">{{ row.nama }}</td>
-                <td class="px-3 py-2 text-xs" style="font-family: monospace; color: var(--text-secondary)">{{ row.nip_baru }}</td>
+                <td class="px-3 py-2 text-xs" style="font-family: monospace; color: var(--text-secondary)">{{ maskNip(row.nip_baru) }}</td>
                 <td class="px-3 py-2">
                   <span class="inline-block px-1.5 py-0.5 rounded text-xs font-semibold" style="background: var(--sky-50); color: var(--sky-700); border: 1px solid var(--sky-100)">{{ row.golongan }}</span>
                 </td>
@@ -196,7 +206,8 @@ const base    = config.public.apiBase
 const idParam = computed(() => route.params.id)
 
 const data     = ref(null)
-const penyuluh = ref([])
+const penyuluh      = ref([])
+const notAuthorized = ref(false)
 const loading  = ref(true)
 const error    = ref(null)
 
@@ -205,11 +216,21 @@ async function fetchDetail() {
   error.value   = null
   try {
     const detail = await $fetch(`${base}/provinsi/${idParam.value}`)
+    if (!detail || detail.total === 0) {
+      error.value = 'Tidak ada data penyuluh untuk provinsi ini.'
+      return
+    }
     data.value   = detail
-    const p      = await $fetch(`${base}/penyuluh?limit=15&page=1&provinsi=${encodeURIComponent(detail.nama)}`)
+    const p      = await $fetch(`${base}/penyuluh?limit=15&page=1&provinsi=${encodeURIComponent(detail.nama)}`, {
+      credentials: 'include'
+    })
     penyuluh.value = p.data || []
   } catch (err) {
-    error.value = err.message || 'Gagal memuat data provinsi'
+    if (err.status === 401) {
+      notAuthorized.value = true
+    } else {
+      error.value = err.message || 'Gagal memuat data provinsi'
+    }
   } finally {
     loading.value = false
   }
@@ -274,6 +295,11 @@ const usiaItems = computed(() => {
     color: USIA_SLOTS[i]?.color ?? '#a09d96',
   }))
 })
+
+function maskNip(nip) {
+  if (!nip) return '–'
+  return nip.substring(0, 4) + '*'.repeat(nip.length - 4)
+}
 
 function stripSatker(raw) {
   if (!raw) return '–'
