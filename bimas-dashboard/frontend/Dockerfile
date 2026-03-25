@@ -3,12 +3,15 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package.json .
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 COPY . .
 
 ARG API_BASE=http://backend:3001/api
 ENV API_BASE=$API_BASE
+
+# Rebuild esbuild untuk platform yang benar
+RUN npm rebuild esbuild
 
 RUN npm run build
 

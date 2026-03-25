@@ -3,10 +3,112 @@ import cors from 'cors'
 import pg from 'pg'
 import ExcelJS from 'exceljs'
 import PDFDocument from 'pdfkit'
+import session from 'express-session'
+import passport from 'passport'
+import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
+import crypto from 'crypto'
 
 const { Pool } = pg
 const app  = express()
 const PORT = process.env.PORT || 3001
+
+// ─────────────────────────────────────────────────────────
+//  SESSION & PASSPORT
+// ─────────────────────────────────────────────────────────
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    process.env.FRONTEND_URL || 'http://localhost:3000'
+  ],
+  credentials: true
+}))
+
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'bimas_secret_key_2025',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 24 * 60 * 60 * 1000, // 24 jam
+    sameSite: 'lax',
+    secure: false  // true jika pakai HTTPS
+  }
+}))
+
+app.use(passport.initialize())
+app.use(passport.session())
+
+// Email yang diizinkan jadi admin (dari .env, pisah koma)
+const ALLOWED_EMAILS = (process.env.ADMIN_ALLOWED_EMAILS || '')
+  .split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+
+// Simple token store (in-memory) — token → user data
+const tokenStore = new Map()
+
+function generateToken(user) {
+  const token = crypto.randomBytes(32).toString('hex')
+  tokenStore.set(token, { ...user, expires: Date.now() + 24 * 60 * 60 * 1000 })
+  return token
+}
+
+function validateToken(token) {
+  const data = tokenStore.get(token)
+  if (!data) return null
+  if (Date.now() > data.expires) { tokenStore.delete(token); return null }
+  return data
+}
+
+passport.use(new GoogleStrategy({
+  clientID:     process.env.GOOGLE_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  callbackURL:  process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3001/auth/google/callback',
+}, (_accessToken, _refreshToken, profile, done) => {
+  const email = profile.emails?.[0]?.value?.toLowerCase()
+  if (!email || !ALLOWED_EMAILS.includes(email)) {
+    return done(null, false, { message: 'Email tidak diizinkan' })
+  }
+  return done(null, { id: profile.id, email, name: profile.displayName, photo: profile.photos?.[0]?.value })
+}))
+
+passport.serializeUser((user, done) => done(null, user))
+passport.deserializeUser((user, done) => done(null, user))
+
+// ─────────────────────────────────────────────────────────
+//  AUTH ROUTES — Google OAuth
+// ─────────────────────────────────────────────────────────
+app.get('/auth/google',
+  passport.authenticate('google', { scope: ['profile', 'email'] })
+)
+
+app.get('/auth/google/callback',
+  passport.authenticate('google', { failureRedirect: '/auth/failed', session: false }),
+  (req, res) => {
+    const token = generateToken(req.user)
+    const frontend = process.env.FRONTEND_URL || 'http://localhost:3000'
+    res.redirect(`${frontend}/admin?auth=success&token=${token}`)
+  }
+)
+
+app.get('/auth/failed', (_req, res) => {
+  res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin?auth=failed`)
+})
+
+app.get('/auth/me', (req, res) => {
+  const token = req.headers['authorization']?.replace('Bearer ', '')
+  if (!token) return res.json({ authenticated: false })
+  const user = validateToken(token)
+  if (user) {
+    res.json({ authenticated: true, user })
+  } else {
+    res.json({ authenticated: false })
+  }
+})
+
+app.post('/auth/logout', (req, res) => {
+  const token = req.headers['authorization']?.replace('Bearer ', '')
+  if (token) tokenStore.delete(token)
+  res.json({ ok: true })
+})
 
 // ─────────────────────────────────────────────────────────
 //  DATABASE CONNECTION
@@ -73,7 +175,6 @@ function extractProvinsi(raw) {
 // ─────────────────────────────────────────────────────────
 //  MIDDLEWARE
 // ─────────────────────────────────────────────────────────
-app.use(cors({ origin: ['http://localhost:3000', 'http://localhost:3001'] }))
 app.use(express.json())
 app.use((req, _res, next) => {
   console.log(`[${new Date().toLocaleTimeString('id-ID')}] ${req.method} ${req.path}`)
